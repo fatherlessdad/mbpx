@@ -2,28 +2,9 @@ import express from "express";
 
 const app = express();
 
-const ALLOWED_ORIGINS = [
-  "https://preview--valiww.lovable.app",
-  "https://primeflix.to",
-  "https://primeflix.ru",
-  "https://vidstorm.ru",
-  "https://vidrock.ru"
-];
-
-function isAllowed(ref = "") {
-  return ALLOWED_ORIGINS.some(origin => ref.startsWith(origin));
-}
-
-app.get("/*", async (req, res) => {
+app.get(/.*/, async (req, res) => {
   try {
-    const referer = req.get("referer") || "";
-    const origin = req.get("origin") || "";
-
-    if (!isAllowed(referer) && !isAllowed(origin)) {
-      return res.status(403).send("no");
-    }
-
-    const encoded = req.params[0];
+    const encoded = req.path.slice(1);
 
     if (!encoded) {
       return res.status(400).send("Missing encoded URL");
@@ -49,33 +30,52 @@ app.get("/*", async (req, res) => {
       ? filenameParam
       : filenameParam + ".mp4";
 
-    const headers = {
+    const upstreamHeaders = {
       "Accept": "*/*",
       "Accept-Encoding": "identity;q=1, *;q=0",
       "Accept-Language": "en-GB,en;q=0.9",
       "DNT": "1",
       "Origin": "https://lok-lok.cc",
       "Referer": "https://lok-lok.cc/",
-      "sec-ch-ua": '"Google Chrome";v="137", "Chromium";v="137", "Not/A)Brand";v="24"',
+      "sec-ch-ua":
+        '"Google Chrome";v="137", "Chromium";v="137", "Not/A)Brand";v="24"',
       "sec-ch-ua-mobile": "?0",
       "sec-ch-ua-platform": '"Windows"',
       "Sec-Fetch-Dest": "video",
       "Sec-Fetch-Mode": "cors",
       "Sec-Fetch-Site": "cross-site",
-      "User-Agent": "Mozilla/5.0"
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
     };
 
     if (req.headers.range) {
-      headers["Range"] = req.headers.range;
+      upstreamHeaders["Range"] = req.headers.range;
     }
 
-    const upstream = await fetch(target, {
-      headers
+    const upstreamRes = await fetch(target, {
+      method: "GET",
+      headers: upstreamHeaders,
     });
 
-    res.status(upstream.status);
+    res.status(upstreamRes.status);
 
-    upstream.headers.forEach((value, key) => {
+    upstreamRes.headers.forEach((value, key) => {
+      // Skip hop-by-hop headers
+      if (
+        [
+          "connection",
+          "keep-alive",
+          "proxy-authenticate",
+          "proxy-authorization",
+          "te",
+          "trailer",
+          "transfer-encoding",
+          "upgrade",
+        ].includes(key.toLowerCase())
+      ) {
+        return;
+      }
+
       res.setHeader(key, value);
     });
 
@@ -84,38 +84,38 @@ app.get("/*", async (req, res) => {
       `attachment; filename="${safeName}"`
     );
 
-    if (!upstream.body) {
+    if (!upstreamRes.body) {
       return res.end();
     }
 
-    const reader = upstream.body.getReader();
+    // Stream response
+    const reader = upstreamRes.body.getReader();
 
-    async function pump() {
-      while (true) {
-        const { done, value } = await reader.read();
+    while (true) {
+      const { done, value } = await reader.read();
 
-        if (done) {
-          res.end();
-          break;
-        }
+      if (done) {
+        res.end();
+        break;
+      }
 
-        res.write(Buffer.from(value));
+      if (!res.write(Buffer.from(value))) {
+        await new Promise((resolve) => res.once("drain", resolve));
       }
     }
-
-    pump().catch(err => {
-      console.error(err);
-      res.destroy(err);
-    });
-
   } catch (err) {
     console.error(err);
-    res.status(500).send("Internal Server Error");
+
+    if (!res.headersSent) {
+      res.status(500).send("Internal Server Error");
+    } else {
+      res.destroy();
+    }
   }
 });
 
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`Listening on ${PORT}`);
+  console.log(`Server listening on port ${PORT}`);
 });
