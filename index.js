@@ -3,9 +3,11 @@ import express from "express";
 const app = express();
 
 const ALLOWED_ORIGINS = [
-  "https://domain3.com",
-  "https://domain2.com",
-  "https://domain1.com"
+  "https://preview--valiww.lovable.app",
+  "https://primeflix.to",
+  "https://primeflix.ru",
+  "https://vidstorm.ru",
+  "https://vidrock.ru"
 ];
 
 function isAllowed(ref = "") {
